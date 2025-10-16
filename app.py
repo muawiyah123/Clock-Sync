@@ -24,7 +24,7 @@ class Node:
 # ===== ALGORITHMS =====
 def berkeley_sync(nodes, use_median=False):
     readings = [n.get_time() for n in nodes]
-    central = statistics.median(readings) if use_median else sum(readings)/len(readings)
+    central = statistics.median(readings) if use_median else sum(readings) / len(readings)
     for node, r in zip(nodes, readings):
         node.adjust(central - r)
 
@@ -35,51 +35,76 @@ def cristian_sync(clients, server):
             server_time += 30.0
         client.adjust(server_time - client.get_time())
 
-# ===== STREAMLIT UI =====
+# ===== STREAMLIT APP =====
 st.set_page_config(page_title="Clock Sync Demo", layout="centered")
 st.title("⏱️ Clock Synchronization in Distributed Systems")
 st.markdown("""
 A college project demonstrating **Berkeley** and **Cristian's** algorithms  
-with support for **Byzantine faults** and **clock drift**.
+with **manual clock input**, **fault simulation**, and real-time sync status.
 """)
 
-# Sidebar options
-st.sidebar.header("Simulation Settings")
+# Sidebar
+st.sidebar.header("⚙️ Simulation Settings")
 algorithm = st.sidebar.selectbox("Algorithm", ["Berkeley", "Cristian"])
 fault_type = st.sidebar.selectbox("Fault Type", ["None", "Byzantine Node"])
 use_robust = st.sidebar.checkbox("Use Robust Mode (Median for Berkeley)")
 
-if st.sidebar.button("🔄 Reset"):
-    st.cache_data.clear()  # Clears cached results
-    st.rerun()
+# Input method
+input_method = st.sidebar.radio("Clock Initialization", ["Random Drift", "Manual Input"])
 
+if input_method == "Manual Input":
+    st.sidebar.markdown("### Set Initial Clocks (seconds)")
+    manual_times = []
+    for i in range(NUM_NODES):
+        val = st.sidebar.number_input(f"Node {i}", value=1000.0, step=1.0, key=f"node_{i}")
+        manual_times.append(val)
+else:
+    manual_times = None
+
+# Run Simulation
 if st.sidebar.button("▶ Run Simulation"):
-    # Create nodes with random drift
     nodes = []
     byzantine_id = 0 if fault_type == "Byzantine Node" else -1
-    for i in range(NUM_NODES):
-        drift = random.uniform(0.99, 1.01)  # ±1% drift
-        is_byz = (i == byzantine_id)
-        nodes.append(Node(i, drift, is_byz))
 
-    # Measure before
+    for i in range(NUM_NODES):
+        if manual_times is not None:
+            # Manual mode: fixed initial time
+            node = Node(i, drift=1.0, is_byzantine=(i == byzantine_id))
+            node.offset = manual_times[i] - BASE_TIME
+        else:
+            # Random drift mode
+            drift = random.uniform(0.99, 1.01)
+            node = Node(i, drift=drift, is_byzantine=(i == byzantine_id))
+        nodes.append(node)
+
+    # Measure before sync
     before_times = [n.get_time() for n in nodes]
     skew_before = max(before_times) - min(before_times)
 
-    # Run algorithm
+    # Run selected algorithm
     if algorithm == "Berkeley":
-        berkeley_sync(nodes, use_median=use_robust)
+        active_nodes = nodes[1:] if fault_type == "Crash" else nodes
+        berkeley_sync(active_nodes, use_median=use_robust)
     else:  # Cristian
         server = nodes[0]
         clients = nodes[1:]
+        if fault_type == "Crash":
+            clients = nodes[2:]  # skip crashed client
         cristian_sync(clients, server)
 
-    # Measure after
+    # Measure after sync
     after_times = [n.get_time() for n in nodes]
     skew_after = max(after_times) - min(after_times)
 
-    # Display results
-    st.success(f"✅ **{algorithm} Algorithm** completed!")
+    # ===== FEATURE: SYNCHRONIZATION STATUS =====
+    st.subheader("⏱️ Clock Synchronization Status")
+    SYNC_THRESHOLD = 0.1  # seconds
+    if skew_after < SYNC_THRESHOLD:
+        st.success(f"🟢 **SYNCHRONIZED** (Skew: {skew_after:.4f} sec < {SYNC_THRESHOLD}s)")
+    else:
+        st.error(f"🔴 **UNSYNCHRONIZED** (Skew: {skew_after:.4f} sec ≥ {SYNC_THRESHOLD}s)")
+
+    # Metrics
     col1, col2 = st.columns(2)
     col1.metric("Skew Before Sync", f"{skew_before:.4f} sec")
     col2.metric("Skew After Sync", f"{skew_after:.4f} sec")
@@ -89,13 +114,13 @@ if st.sidebar.button("▶ Run Simulation"):
     node_ids = [f"Node {n.node_id}" for n in nodes]
     ax.plot(node_ids, before_times, 'ro-', label='Before Sync')
     ax.plot(node_ids, after_times, 'go-', label='After Sync')
-    ax.set_ylabel("Clock Time")
+    ax.set_ylabel("Clock Time (seconds)")
     ax.set_title("Clock Values Across Nodes")
     ax.legend()
     ax.grid(True)
     st.pyplot(fig)
 
-    # Explanation
+    # Explanations
     if fault_type == "Byzantine Node":
         st.info("💡 **Byzantine Node**: Node 0 reports fake time (+30 sec).")
         if algorithm == "Berkeley" and use_robust:
@@ -105,4 +130,4 @@ if st.sidebar.button("▶ Run Simulation"):
 
 # Footer
 st.markdown("---")
-st.caption("College Project • Clock Synchronization • Berkeley vs Cristian")
+st.caption("College Project • Distributed Systems • Streamlit Demo")
